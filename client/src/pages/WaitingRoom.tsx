@@ -30,6 +30,7 @@ export default function WaitingRoom() {
   const [gameTimer, setGameTimer] = useState(0)
   const [isGameStarting, setIsGameStarting] = useState(false)
   const [gameStatus, setGameStatus] = useState<'waiting' | 'ready' | 'starting'>('waiting')
+  const [playMode, setPlayMode] = useState<'single' | 'multi'>('multi')
   const nav = useNavigate()
 
   useEffect(() => {
@@ -50,7 +51,8 @@ export default function WaitingRoom() {
     // Escuchar eventos del socket
     socket.on('playersUpdate', (playersList: Player[]) => {
       setPlayers(playersList)
-      if (playersList.length === 5) {
+      const minPlayers = playMode === 'single' ? 1 : 5
+      if (playersList.length === minPlayers) {
         setGameStatus('ready')
       } else {
         setGameStatus('waiting')
@@ -69,14 +71,19 @@ export default function WaitingRoom() {
       nav('/game')
     })
 
-    socket.on('roomStatus', (data: { inRoom: boolean; playersList?: Player[] }) => {
+    socket.on('roomStatus', (data: { inRoom: boolean; playersList?: Player[]; playMode?: 'single' | 'multi' }) => {
       if (!data.inRoom) {
         nav('/')
       } else {
+        // Actualizar modo de juego
+        if (data.playMode) {
+          setPlayMode(data.playMode)
+        }
         // Actualizar lista de jugadores
         if (data.playersList) {
           setPlayers(data.playersList)
-          if (data.playersList.length === 5) {
+          const minPlayers = (data.playMode || playMode) === 'single' ? 1 : 5
+          if (data.playersList.length === minPlayers) {
             setGameStatus('ready')
           } else {
             setGameStatus('waiting')
@@ -106,13 +113,22 @@ export default function WaitingRoom() {
       }
     })
 
-    socket.on('playerJoined', (data: { players: Player[] }) => {
+    socket.on('playerJoined', (data: { players: Player[]; playMode?: 'single' | 'multi' }) => {
       setPlayers(data.players)
-      if (data.players.length === 5) {
+      if (data.playMode) {
+        setPlayMode(data.playMode)
+      }
+      const currentPlayMode = data.playMode || playMode
+      const minPlayers = currentPlayMode === 'single' ? 1 : 5
+      if (data.players.length === minPlayers) {
         setGameStatus('ready')
       } else {
         setGameStatus('waiting')
       }
+    })
+
+    socket.on('roomPlayMode', (data: { playMode: 'single' | 'multi' }) => {
+      setPlayMode(data.playMode)
     })
 
     return () => {
@@ -122,6 +138,7 @@ export default function WaitingRoom() {
       socket.off('roomStatus')
       socket.off('roundState')
       socket.off('playerJoined')
+      socket.off('roomPlayMode')
       socket.off('connect')
     }
   }, [socket, user, nav])
@@ -134,7 +151,8 @@ export default function WaitingRoom() {
 
   const getPlayerSlots = () => {
     const slots = []
-    for (let i = 0; i < 5; i++) {
+    const maxSlots = playMode === 'single' ? 1 : 5
+    for (let i = 0; i < maxSlots; i++) {
       const player = players[i]
       const character = player?.characterId ? CHARACTERS[player.characterId] : undefined
       slots.push(
@@ -227,7 +245,9 @@ export default function WaitingRoom() {
         <div className="flex items-center space-x-4">
           <div className="text-right">
             <div className="text-sm text-slate-400">Jugadores conectados</div>
-            <div className="text-xl font-bold text-white">{players.length}/5</div>
+            <div className="text-xl font-bold text-white">
+              {playMode === 'single' ? `${players.length}/1` : `${players.length}/5`}
+            </div>
           </div>
         </div>
       </div>
@@ -242,15 +262,17 @@ export default function WaitingRoom() {
           {gameStatus === 'waiting' && (
             <div className="space-y-2">
               <div className="text-3xl font-bold text-yellow-400">
-                Esperando jugadores...
+                {playMode === 'single' ? 'Listo para comenzar' : 'Esperando jugadores...'}
               </div>
               <div className="text-slate-300">
-                Se necesitan {5 - players.length} jugadores más para comenzar
+                {playMode === 'single' 
+                  ? 'Presiona el botón para iniciar la partida'
+                  : `Se necesitan ${5 - players.length} jugadores más para comenzar`}
               </div>
             </div>
           )}
           
-          {gameStatus === 'ready' && !isGameStarting && (
+          {gameStatus === 'ready' && !isGameStarting && playMode === 'multi' && (
             <div className="space-y-2">
               <div className="text-3xl font-bold text-green-400">
                 ¡Todos los jugadores conectados!
@@ -282,8 +304,24 @@ export default function WaitingRoom() {
 
         {/* Players Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-          {getPlayerSlots()}
+          {playMode === 'single' ? getPlayerSlots().slice(0, 1) : getPlayerSlots()}
         </div>
+
+        {/* Botón de inicio manual para modo single player */}
+        {playMode === 'single' && gameStatus === 'waiting' && players.length === 1 && (
+          <motion.div 
+            className="text-center mb-8"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <button
+              onClick={() => socket?.emit('startSinglePlayerGame')}
+              className="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-lg text-xl transition-all transform hover:scale-105 shadow-lg"
+            >
+              🎮 Iniciar Partida
+            </button>
+          </motion.div>
+        )}
 
         {/* Instructions */}
         <motion.div 
@@ -295,7 +333,7 @@ export default function WaitingRoom() {
           <h3 className="text-lg font-semibold text-white mb-4">📋 Instrucciones del Juego</h3>
           <div className="grid md:grid-cols-2 gap-4 text-sm text-slate-300">
             <ul className="space-y-2">
-              <li>• <strong>5 jugadores</strong> compiten simultáneamente</li>
+              <li>• <strong>{playMode === 'single' ? '1 jugador' : '5 jugadores'}</strong> {playMode === 'single' ? 'juega solo' : 'compiten simultáneamente'}</li>
               <li>• <strong>$10,000</strong> iniciales para invertir</li>
               <li>• <strong>5 rondas</strong> de 1 minuto cada una</li>
               <li>• Observa las <strong>noticias</strong> antes de cada ronda</li>
@@ -303,7 +341,7 @@ export default function WaitingRoom() {
             <ul className="space-y-2">
               <li>• Compra y vende <strong>acciones</strong> estratégicamente</li>
               <li>• Las noticias <strong>afectan los precios</strong></li>
-              <li>• Gana quien tenga el <strong>mayor portafolio</strong></li>
+              <li>• {playMode === 'single' ? 'Mejora tu <strong>portafolio</strong>' : 'Gana quien tenga el <strong>mayor portafolio</strong>'}</li>
               <li>• Recibe un <strong>certificado</strong> al finalizar</li>
             </ul>
           </div>

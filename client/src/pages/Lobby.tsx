@@ -13,6 +13,7 @@ const CHARACTERS = [
 
 export default function Lobby() {
   const [gameMode, setGameMode] = useState<'create' | 'join' | null>(null)
+  const [playMode, setPlayMode] = useState<'single' | 'multi'>('multi')
   const [roomCode, setRoomCode] = useState('')
   const [playerName, setPlayerName] = useState('')
   const [selectedCharacter, setSelectedCharacter] = useState<number | null>(null)
@@ -32,6 +33,9 @@ export default function Lobby() {
       console.log('Room created:', data)
       setGeneratedCode(data.roomCode)
       setError('')
+      if (data.playMode) {
+        setPlayMode(data.playMode)
+      }
     })
 
     socket.on('roomError', (data: any) => {
@@ -90,7 +94,8 @@ export default function Lobby() {
         socket.emit('createRoom', {
           playerName: playerName.trim(),
           roomCode: code,
-          characterId: selectedCharacter
+          characterId: selectedCharacter,
+          playMode: playMode
         })
         setGeneratedCode(code)
       }
@@ -137,6 +142,7 @@ export default function Lobby() {
 
   const resetForm = () => {
     setGameMode(null)
+    setPlayMode('multi')
     setRoomCode('')
     setPlayerName('')
     setSelectedCharacter(null)
@@ -229,6 +235,36 @@ export default function Lobby() {
               />
             </div>
 
+            <div className="relative z-[99999] bg-slate-800/90 backdrop-blur-sm p-4 rounded-lg">
+              <label className="block text-white font-medium mb-3">Modo de Juego</label>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={() => setPlayMode('single')}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    playMode === 'single'
+                      ? 'border-blue-500 bg-blue-500/20 text-white'
+                      : 'border-slate-600 bg-slate-700 text-slate-300 hover:border-blue-400'
+                  }`}
+                >
+                  <div className="text-2xl mb-2">🎮</div>
+                  <div className="font-semibold">Un Solo Jugador</div>
+                  <div className="text-xs mt-1 opacity-80">Juega solo</div>
+                </button>
+                <button
+                  onClick={() => setPlayMode('multi')}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    playMode === 'multi'
+                      ? 'border-blue-500 bg-blue-500/20 text-white'
+                      : 'border-slate-600 bg-slate-700 text-slate-300 hover:border-blue-400'
+                  }`}
+                >
+                  <div className="text-2xl mb-2">👥</div>
+                  <div className="font-semibold">Multijugador</div>
+                  <div className="text-xs mt-1 opacity-80">Hasta 5 jugadores</div>
+                </button>
+              </div>
+            </div>
+
             <div>
               <label className="block text-white font-bold mb-4 text-xl text-center">
                 ✨ Selecciona tu Personaje ✨
@@ -301,7 +337,9 @@ export default function Lobby() {
                   </button>
                 </div>
                 <p className="text-slate-400 text-xs mt-2">
-                  Esperando a que se unan 4 jugadores más...
+                  {playMode === 'single' 
+                    ? 'Modo de un solo jugador. Presiona iniciar cuando estés listo.'
+                    : 'Esperando a que se unan 4 jugadores más...'}
                 </p>
               </div>
             )}

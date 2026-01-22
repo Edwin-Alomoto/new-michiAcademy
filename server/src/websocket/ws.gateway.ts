@@ -49,6 +49,7 @@ interface GameRoom {
   id: string;
   code: string;
   players: Player[];
+  playMode: 'single' | 'multi';
   status: 'waiting' | 'ready' | 'starting' | 'playing' | 'finished';
   currentRound: number;
   roundTimer: number;
@@ -574,6 +575,7 @@ export class WsGateway implements OnModuleInit, OnGatewayConnection, OnGatewayDi
       status: room.status,
       players: room.players.length,
       playersList: this.mapPlayersForClient(room.players),
+      playMode: room.playMode,
     });
   }
 
@@ -679,8 +681,8 @@ export class WsGateway implements OnModuleInit, OnGatewayConnection, OnGatewayDi
   }
 
   @SubscribeMessage('createRoom')
-  handleCreateRoom(client: Socket, payload: { playerName: string; roomCode: string; characterId?: number }) {
-    const { playerName, roomCode, characterId } = payload;
+  handleCreateRoom(client: Socket, payload: { playerName: string; roomCode: string; characterId?: number; playMode?: 'single' | 'multi' }) {
+    const { playerName, roomCode, characterId, playMode = 'multi' } = payload;
     
     // Verificar si el código ya existe
     if (this.roomCodes.has(roomCode)) {
@@ -739,8 +741,17 @@ export class WsGateway implements OnModuleInit, OnGatewayConnection, OnGatewayDi
     client.emit('roomCreated', { 
       roomCode, 
       players: room.players,
-      message: 'Sala creada exitosamente. Esperando más jugadores...'
+      playMode: playMode,
+      message: playMode === 'single' 
+        ? 'Sala creada exitosamente. Presiona iniciar cuando estés listo.'
+        : 'Sala creada exitosamente. Esperando más jugadores...'
     });
+
+    // Enviar playMode en playersUpdate para que el frontend lo conozca
+    this.server.to(roomId).emit('roomPlayMode', { playMode: playMode });
+    
+    // NOTA: En modo single player, NO iniciamos automáticamente al crear la sala
+    // El usuario debe presionar el botón "Iniciar Partida" manualmente
   }
 
   @SubscribeMessage('joinRoom')
@@ -809,13 +820,15 @@ export class WsGateway implements OnModuleInit, OnGatewayConnection, OnGatewayDi
     this.server.to(roomId).emit('playerJoined', {
       player: this.mapPlayerForClient(player),
       players: publicPlayers,
+      playMode: room.playMode,
       message: `${playerName} se unió a la sala`
     });
 
     this.server.to(roomId).emit('playersUpdate', publicPlayers);
 
-    // Si la sala está llena, iniciar countdown
-    if (room.players.length === 5) {
+    // Si la sala está llena (multijugador) o tiene 1 jugador (single player), iniciar countdown
+    if ((room.playMode === 'multi' && room.players.length === 5) || 
+        (room.playMode === 'single' && room.players.length === 1)) {
       room.status = 'ready';
       this.startGameCountdown(room);
     }
@@ -1240,6 +1253,43 @@ export class WsGateway implements OnModuleInit, OnGatewayConnection, OnGatewayDi
       this.server.to(roomId).emit('fixedIncomeOffersUpdate', offers);
     }, 100);
     this.fixedIncomeOffersUpdateTimers.set(roomId, timer);
+  }
+
+  @SubscribeMessage('startSinglePlayerGame')
+  handleStartSinglePlayerGame(client: Socket) {
+    const roomId = this.playerSockets.get(client.id);
+    if (!roomId) {
+      client.emit('roomError', { message: 'No estás en una sala' });
+      return;
+    }
+
+    const room = this.gameRooms.get(roomId);
+    if (!room) {
+      client.emit('roomError', { message: 'Sala no encontrada' });
+      return;
+    }
+
+    // Verificar que es modo single player
+    if (room.playMode !== 'single') {
+      client.emit('roomError', { message: 'Este evento solo es válido para modo single player' });
+      return;
+    }
+
+    // Verificar que hay al menos 1 jugador
+    if (room.players.length < 1) {
+      client.emit('roomError', { message: 'No hay jugadores en la sala' });
+      return;
+    }
+
+    // Verificar que el juego no haya comenzado
+    if (room.status === 'playing' || room.status === 'finished') {
+      client.emit('roomError', { message: 'El juego ya está en curso' });
+      return;
+    }
+
+    // Iniciar countdown
+    room.status = 'ready';
+    this.startGameCountdown(room);
   }
 
   private startGameCountdown(room: GameRoom) {
