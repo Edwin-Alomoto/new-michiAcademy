@@ -1298,12 +1298,17 @@ export class WsGateway implements OnModuleInit, OnGatewayConnection, OnGatewayDi
     let countdown = 10;
     room.status = 'starting';
 
-    const countdownInterval = setInterval(() => {
-      this.server.to(room.id).emit('gameStartCountdown', countdown);
-      countdown--;
+    // Emitir el primer countdown inmediatamente
+    this.server.to(room.id).emit('gameStartCountdown', countdown);
+    countdown--;
 
-      if (countdown < 0) {
+    const countdownInterval = setInterval(() => {
+      if (countdown >= 0) {
+        this.server.to(room.id).emit('gameStartCountdown', countdown);
+        countdown--;
+      } else {
         clearInterval(countdownInterval);
+        // Emitir evento de inicio del juego
         this.startGame(room);
       }
     }, 1000);

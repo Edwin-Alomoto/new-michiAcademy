@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSocket } from '../hooks/useSocket'
 
@@ -21,6 +21,7 @@ export default function Lobby() {
   const [error, setError] = useState('')
   const [generatedCode, setGeneratedCode] = useState('')
   const [takenCharacters, setTakenCharacters] = useState<number[]>([])
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const socket = useSocket()
   const navigate = useNavigate()
@@ -31,17 +32,39 @@ export default function Lobby() {
     // Escuchar eventos del socket
     socket.on('roomCreated', (data: any) => {
       console.log('Room created:', data)
-      setGeneratedCode(data.roomCode)
       setError('')
+      
+      // Establecer playMode primero
       if (data.playMode) {
         setPlayMode(data.playMode)
+      }
+      
+      // Solo establecer generatedCode si es modo multijugador
+      if (data.playMode === 'multi') {
+        setGeneratedCode(data.roomCode)
+        setIsLoading(false)
+      } else {
+        // En modo single, NO establecer generatedCode para que no se muestre
+        setGeneratedCode('')
+        setIsLoading(false)
+        // En modo single player, redirigir automáticamente a la sala de espera INMEDIATAMENTE
+        console.log('Single player mode detected, redirecting to waiting room...')
+        navigate('/waiting')
       }
     })
 
     socket.on('roomError', (data: any) => {
-      console.log('Room error:', data)
-      setError(data.message)
+      console.error('❌ Room error received:', data)
+      
+      // Limpiar timeout si existe
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      
+      setError(data.message || 'Error al crear la partida')
       setIsLoading(false)
+      setGeneratedCode('') // Limpiar código en caso de error
     })
 
     socket.on('playerJoined', (data: any) => {
@@ -85,23 +108,57 @@ export default function Lobby() {
 
     setIsLoading(true)
     setError('')
+    setGeneratedCode('') // Limpiar código anterior
+
+    // Timeout de seguridad: si no hay respuesta en 5 segundos, mostrar error
+    const timeoutId = setTimeout(() => {
+      console.error('Timeout: No se recibió respuesta del servidor después de 5 segundos')
+      setError('No se pudo crear la partida. Verifica tu conexión e intenta de nuevo.')
+      setIsLoading(false)
+    }, 5000)
 
     try {
       // Generar código único de 6 caracteres
       const code = Math.random().toString(36).substring(2, 8).toUpperCase()
 
-      if (socket) {
-        socket.emit('createRoom', {
-          playerName: playerName.trim(),
-          roomCode: code,
-          characterId: selectedCharacter,
-          playMode: playMode
-        })
-        setGeneratedCode(code)
+      if (!socket) {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current)
+          timeoutRef.current = null
+        }
+        setError('No hay conexión con el servidor. Por favor recarga la página.')
+        setIsLoading(false)
+        return
       }
+
+      // Verificar que el socket esté conectado
+      if (!socket.connected) {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current)
+          timeoutRef.current = null
+        }
+        setError('No estás conectado al servidor. Por favor recarga la página.')
+        setIsLoading(false)
+        return
+      }
+
+      console.log('📤 Creating room with playMode:', playMode, 'Code:', code, 'Socket connected:', socket.connected)
+
+      socket.emit('createRoom', {
+        playerName: playerName.trim(),
+        roomCode: code,
+        characterId: selectedCharacter,
+        playMode: playMode
+      })
+      
+      console.log('✅ Room creation request sent, waiting for response...')
     } catch (err) {
-      setError('Error al crear la partida')
-    } finally {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      console.error('❌ Error creating room:', err)
+      setError('Error al crear la partida. Por favor intenta de nuevo.')
       setIsLoading(false)
     }
   }
@@ -321,7 +378,7 @@ export default function Lobby() {
               </div>
             </div>
 
-            {generatedCode && (
+            {generatedCode && playMode === 'multi' && (
               <div className="bg-green-900/30 border border-green-500 rounded-lg p-4">
                 <h3 className="text-green-400 font-semibold mb-2">¡Partida Creada!</h3>
                 <p className="text-white text-sm mb-3">Comparte este código con otros jugadores:</p>
@@ -337,12 +394,12 @@ export default function Lobby() {
                   </button>
                 </div>
                 <p className="text-slate-400 text-xs mt-2">
-                  {playMode === 'single' 
-                    ? 'Modo de un solo jugador. Presiona iniciar cuando estés listo.'
-                    : 'Esperando a que se unan 4 jugadores más...'}
+                  Esperando a que se unan 4 jugadores más...
                 </p>
               </div>
             )}
+            
+            {/* En modo single player, NO mostrar ningún mensaje porque se redirige automáticamente */}
 
             {!generatedCode && (
               <button
