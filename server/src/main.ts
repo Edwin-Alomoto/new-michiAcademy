@@ -11,10 +11,16 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 
 async function bootstrap() {
-  // Verificar que DATABASE_URL esté configurada en producción
-  if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL) {
-    console.error('ERROR: DATABASE_URL no está configurada en producción');
-    process.exit(1);
+  // Debug: Mostrar información de DATABASE_URL (sin mostrar credenciales completas)
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    const maskedUrl = dbUrl.replace(/:([^:@]+)@/, ':****@'); // Ocultar contraseña
+    console.log(`DATABASE_URL configurada: ${maskedUrl}`);
+  } else {
+    console.error('ERROR: DATABASE_URL no está configurada');
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    }
   }
   
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
